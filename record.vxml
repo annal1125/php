@@ -1,0 +1,47 @@
+<!--  /var/log/voiceglue -->
+<?xml version="1.0"?>
+<vxml version="2.0" xml:base="http://192.168.1.210/vxml">
+
+<form id="start">
+<property name="inputmodes" value="dtmf"/>
+
+  <catch event="error.unsupported.record">
+    <prompt>Recording is not supported in the current configuration, no
+      audio source specified.</prompt>
+    <exit/>
+  </catch>
+
+  <record name="recording" maxtime="10s" finalsilence="2s" beep="true">
+    <noinput> nothing was recoreded </noinput>
+		Recording starts after beep
+    <filled>Your recorded: <audio expr="recording"/></filled>
+  </record>
+
+
+
+  <field name="answer">
+    <noinput> Hey, Say something </noinput>
+    <nomatch> Save press '1' cancel press '2' </nomatch>
+    <prompt>Press '1' to 'save' , Press '2' to 'cancel' </prompt>
+
+    <grammar mode="dtmf">
+      <rule id="main" scope="public">
+        <one-of>
+          <item>1</item>
+          <item>2</item>
+       </one-of>
+      </rule>
+    </grammar>
+
+    <filled>
+      <if cond="answer=='2'">
+        Message not saved  good bye.
+        <exit/>
+	  <elseif cond="answer=='1'"/>
+		<submit next="save.php"  namelist="recording" method="post"/>
+		<exit/>
+      </if>
+    </filled>
+  </field>
+</form>
+</vxml>

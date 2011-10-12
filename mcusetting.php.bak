@@ -1,0 +1,472 @@
+﻿<?php
+if($_COOKIE['login'] != "yes")
+{
+	header('Location: index.php');
+	exit;
+}
+
+	include "filepath.php";
+	include "AstManager.php";
+	
+	if( $PLATFORM == 3 )
+		$TRASH_PIC = "planet_trash.jpg";
+	else
+		$TRASH_PIC = "trash.jpg";
+	
+	
+
+
+	$MCU_PATH = "$BASE_AST/ex_mcu.conf";
+	$MEETME_PATH = "$BASE_AST/meetme.conf";
+	$MCU_MAX_PATH = "$BASE_CONF/config/max.conf";
+	
+	$SizeArray = array(
+		"CIF" 		=> "CIF" ,
+		"QCIF" 		=> "QCIF" );		
+		
+	$BitrateArray = array(
+					"64" 	=> "64Kbps",
+					"128" 	=> "128Kbps",
+					"256"	=> "256Kbps",
+					"384"	=> "384Kbps",
+					"512"	=> "512Kbps");
+	$FPSArray = array();
+	
+	for($i =5; $i<31; $i++ )
+	{
+		array_push( $FPSArray , $i );
+	}
+	
+	
+	Net_AsteriskManager( '127.0.0.1' , '5038' );
+	connect();
+	login('admin', 'avadesign22221266');
+
+	
+	if(isset($_POST[Submit]))
+	{		
+		$StrTotal  = "[general]\n";
+		$StrTotal .= "composition=34\n";
+		$StrTotal .= "size=$size\n";
+		$StrTotal .= "bitrate=$bitrate\n";
+		$StrTotal .= "fps=".($fps+5)."\n";
+		$fp = fopen( $MEETME_PATH , "w+");
+		fwrite( $fp , $StrTotal );		
+		fclose( $fp );
+		
+		if( !file_exists( "$BASE_AST/ex_mcu_func.conf" ) )
+		{
+			$StrTotal = "[macro-MCURec]\n";
+			$StrTotal .= "exten => s,1,Set(filetmp=/etc/asterisk/\${EPOCH}.call)\n";
+			$StrTotal .= "exten => s,n,system(echo \"Channel: Local/RecSave@MCU_REC\" >> \${filetmp})\n";
+			$StrTotal .= "exten => s,n,system(echo \"MaxRetries: 1\" >> \${filetmp})\n";
+			$StrTotal .= "exten => s,n,system(echo \"WaitTime:5\" >> \${filetmp})\n";
+			$StrTotal .= "exten => s,n,system(echo \"Context: MCU_REC\" >> \${filetmp})\n";
+			$StrTotal .= "exten => s,n,system(echo \"Extension: meetme\" >> \${filetmp})\n";
+			$StrTotal .= "exten => s,n,system(echo \"SetVar: Room=\${ARG1}\" >> \${filetmp})\n";
+			$StrTotal .= "exten => s,n,system(echo \"Priority: 1\" >> \${filetmp})\n";
+			$StrTotal .= "exten => s,n,system(chown asterisk:asterisk \${filetmp})\n";
+			$StrTotal .= "exten => s,n,system(mv \${filetmp} /var/spool/asterisk/outgoing)\n\n";
+			
+			$StrTotal .= "[MCU_REC]\n";
+			$StrTotal .= "exten => RecSave,1,Answer\n";
+			$StrTotal .= "exten => RecSave,n,mp4save(/var/www/html/mcurecord/\${STRFTIME(\${EPOCH},,%Y%m%d-%H%M%S)}.mp4)\n";
+			$StrTotal .= "exten => RecSave,n,Hangup\n\n";
+			$StrTotal .= "exten => meetme,1,Answer\n";
+			$StrTotal .= "exten => meetme,n,MeetMe(\${Room}|dxq)\n";
+			$StrTotal .= "exten => meetme,n,Hangup\n";
+			
+			$fp = fopen( "$BASE_AST/ex_mcu_func.conf" , "w+");
+			fwrite( $fp , $StrTotal );		
+			fclose( $fp );
+
+		}
+	
+	
+		$StrTotal = "#include  \"ex_mcu_func.conf\"\n\n";
+		$StrTotal .= "[ava_media]\n";
+	
+		for($i = 0; $i < sizeof($ch_RoomNo); $i++ )
+		{
+			$StrTotal .= "exten => $ch_RoomNo[$i],1,Set(members=$ch_members[$i])\n";
+			$StrTotal .= "exten => $ch_RoomNo[$i],n,MeetMeCount(\${EXTEN}|count)\n";
+			$StrTotal .= "exten => $ch_RoomNo[$i],n,GotoIf(\$[\${count}>=\${members}]?hangup)\n";
+			if( $ch_RoomPass[$i] != "" )
+				$StrTotal .= "exten => $ch_RoomNo[$i],n,Authenticate($ch_RoomPass[$i])\n";
+			
+			$StrTotal .= "exten => $ch_RoomNo[$i],n,Set(IsRec=\${DB(MCU_REC/\${EXTEN})})\n";
+			$StrTotal .= "exten => $ch_RoomNo[$i],n,GotoIf($[\"\${IsRec}\" != \"ON\"]?meetme)\n";
+			$StrTotal .= "exten => $ch_RoomNo[$i],n,Macro(MCURec,\${EXTEN})\n";
+			
+			$StrTotal .= "exten => $ch_RoomNo[$i],n(meetme),MeetMe($ch_RoomNo[$i]|adv)\n";
+			$StrTotal .= "exten => $ch_RoomNo[$i],n(hangup),Hangup()\n";
+			$StrTotal .= "\n";
+			
+			if( $ch_check[$i] == "on" )
+				putDB( "MCU_REC" , $ch_RoomNo[$i] , "ON" );
+			else
+				delDB( "MCU_REC" , $ch_RoomNo[$i] );
+			
+		}
+		$fp = fopen( $MCU_PATH , "w+");
+		fwrite( $fp , $StrTotal );		
+		fclose( $fp );
+		
+		shell_exec( "asterisk -rx reload" );
+	} // end if(isset($_POST[Submit]))
+	
+	$fp = fopen ($MCU_MAX_PATH, "r");
+	$tmp = fread ($fp, filesize ($MCU_MAX_PATH));
+	fclose ($fp);
+	$MAX_MCU = chop( substr( $tmp , strlen("max=") ) );
+	
+	// init param
+	$members = array();
+	$RoomNo = array();
+	$RoomPass = array();
+	$check = array();
+
+	$content_array = file( $MEETME_PATH );	
+	while( list($key , $val) = each($content_array) )
+	{		
+		if( strstr( $val , "size=" ) != "" )
+			$size = chop(substr( $val , strlen("size=")));
+		else if( strstr( $val , "bitrate=" ) != "" )
+			$bitrate = chop(substr( $val , strlen("bitrate=")));
+		else if( strstr( $val , "fps=" ) != "" )
+			$fps = chop(substr( $val , strlen("fps=")))-5;
+
+	}// end while
+
+	$content_array = file( $MCU_PATH );	
+	$i = 0;
+
+	while( $content_array[$i] != "" )
+	{	
+		if( strstr( $content_array[$i] , "members=" ) != "" )
+		{
+			$iPos = strrpos( $content_array[$i] , "=" ) + 1;
+			$tmp = substr( $content_array[$i] , $iPos , strrpos($content_array[$i],")")-$iPos  );
+			array_push( $members ,  $tmp );
+			
+			$iPos = strpos( $content_array[$i] , " => " ) + 4;
+			$tmp = substr( $content_array[$i] , $iPos , strpos($content_array[$i],",")-$iPos  );
+			array_push( $RoomNo ,  $tmp );	
+			
+			$res = getDBValue( "MCU_REC" , $tmp );
+	
+			if( strstr( $res , "ON" ) != "" )
+				array_push( $check ,  "checked" );	
+			else
+				array_push( $check ,  "1" );	
+			
+			
+		}
+		else if( strstr( $content_array[$i] , "Authenticate" ) != "" )
+		{  
+			$iPos = strrpos( $content_array[$i] , "Authenticate(" ) + strlen("Authenticate(");
+			$tmp = substr( $content_array[$i] , $iPos , strrpos($content_array[$i],")") - $iPos  );
+			array_push( $RoomPass ,  $tmp );			
+		}
+		$i++;
+	}// end while
+
+	logout();
+
+function ComboSize($str)
+{
+	global $SizeArray;
+
+	if( $str != "" )
+	{
+		echo "<option value=$str>$SizeArray[$str]</option>";
+	}
+	reset( $SizeArray ); 
+
+	while( list($key , $val) = each($SizeArray) )
+	{
+		if( $key == $str )
+			continue;
+		echo "<option value=$key>$val</option>";
+	}
+
+}
+function ComboBitrate($str)
+{
+	global $BitrateArray;
+
+	if( $str != "" )
+	{
+		echo "<option value=$str>$BitrateArray[$str]</option>";
+	}
+	reset( $BitrateArray ); 
+
+	while( list($key , $val) = each($BitrateArray) )
+	{
+		if( $key == $str )
+			continue;
+		echo "<option value=$key>$val</option>";
+	}
+
+}
+function ComboFPS($str)
+{
+	global $FPSArray;
+
+	if( $str != "" )
+	{
+		echo "<option value=$str>$FPSArray[$str]</option>";
+	}
+	reset( $FPSArray ); 
+
+	while( list($key , $val) = each($FPSArray) )
+	{
+		if( $key == $str )
+			continue;
+		echo "<option value=$key>$val</option>";
+	}
+
+}
+
+function ShowRoute($route)
+{
+	global $RouteGroupArray;
+	reset( $RouteGroupArray ); 
+	echo "Annal".$route;
+	if( $route != "" )
+		echo "<option value=$route>$RouteGroupArray[$route]</option>";
+
+	while( list($key , $val) = each($RouteGroupArray) )
+	{
+		if( $key == $route )
+			continue;
+		echo "<option value=$key>$val</option>";
+	}
+
+}
+
+?>
+
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=big5">
+
+<title>Conference Edition</title>
+
+
+<script language = "javascript">
+<!--
+var MAX_MEMBERS = <? echo $MAX_MCU ?>;
+var KEY_DOWN = "";
+
+function GetUsed()
+{
+	var objs = document.getElementsByName("ch_members[]");
+	var tmp = 0;
+	for( var i = 0;i < objs.length; i++ ){
+		if( objs[i].value != "" )
+			tmp += eval(objs[i].value);
+	}
+	return tmp;
+}
+function changemember()
+{
+	var used = GetUsed();
+	var res = eval(MAX_MEMBERS) - eval(used);
+	document.forms[0].sum.value = res + " / " +  MAX_MEMBERS;
+}
+function Addnew()
+{
+	var tableObj = document.getElementById("mytable");
+	var len = tableObj.rows.length;
+    var newRowObj = tableObj.insertRow(len);
+	
+	newRowObj.insertCell(newRowObj.cells.length).innerHTML = 
+	"<input name='ch_RoomNo[]' value='' style='background-color:#A8E61D; width :100%'>";
+	
+	newRowObj.insertCell(newRowObj.cells.length).innerHTML = 
+	"<input name='ch_RoomPass[]' value='' style='background-color:#A8E61D; width :100%'>";
+	
+	newRowObj.insertCell(newRowObj.cells.length).innerHTML = 
+	"<input name='ch_members[]' value='' type='text' onKeyUp='MemberKeyup("+(len-1)+")' style='background-color:#A8E61D; width :100%'>";
+
+	newRowObj.insertCell(newRowObj.cells.length).innerHTML = 
+	"<p align='center'><input name='ch_check[]' value='' type='checkbox' style='background-color:#A8E61D; width :100%'>";
+	
+	newRowObj.insertCell(newRowObj.cells.length).innerHTML = 
+	"<p align='center'><img src='<? echo $TRASH_PIC ?>' onClick='BtnDel("+(len-1)+")' style='cursor: hand; background-color:#A8E61D;'></p>";
+}	
+function BtnDel(msg)
+{
+	document.getElementsByName('ch_RoomNo[]')[msg].value = "";
+	document.getElementsByName('ch_RoomPass[]')[msg].value = "";
+	document.getElementsByName('ch_members[]')[msg].value = "";
+	document.getElementsByName('ch_check[]')[msg].checked = false;
+	
+	changemember();
+}
+function viewfile() 
+{
+	FORM=document.forms[0];
+	var page = 'mcurecord.php?v=' + msg;   
+//	window.open(page,"","");	
+	window.open(page,"","width=600,height=500,scrollbars=yes");	
+//	alert(FORM.FieldSel);
+}
+function isNumber(val){
+var reg = /^[0-9]*$/;
+return reg.test(val);
+}
+function MemberKeyup(msg)
+{
+	var key = document.getElementsByName("ch_members[]")[msg].value;
+	var len = key.length;
+
+	if( !isNumber( key ) )
+		document.getElementsByName("ch_members[]")[msg].value =  key.substr(0,len-1);
+//	else
+//	{
+//		var used = GetUsed();
+//
+//		var newitem = eval(used) - eval(key);
+//
+//		if( eval(used) > eval(MAX_MEMBERS) )
+//			document.getElementsByName("ch_members[]")[msg].value = eval(MAX_MEMBERS) - eval(newitem);
+//		changemember()
+//	}
+}
+function MemberKeydown(msg)
+{
+	var KEY_DOWN = document.getElementsByName("ch_members[]")[msg].value;
+}
+
+
+
+//-->
+</script> 
+
+<style type="text/css">
+<!--
+body {
+        background-color: <? echo $MainBackGroundColor ?>;
+}
+body,td,th {
+	color: #FFFFFF;
+}
+.style1 {font-family: Arial, Helvetica, sans-serif}
+.style3 {font-family: "Courier New", Courier, monospace}
+-->
+</style>
+
+
+</head>
+
+
+<body onload='changemember()';>
+<form name="form" method="POST" enctype="multipart/form-data" action="<? $PHP_SELF ?>">
+<?
+
+	echo "<p align='left' style=$MainTitleStyle color='$MainTitleTextColor'>&nbsp;&nbsp;";
+	echo $WORDLIST['mcuset'][$LANG];
+	echo "</p>";
+	//<table id="mytable" width="100%" border="1" align="center">
+
+?>
+<?php
+	echo "<div align='left' style=$MainTitleStyle color='$MainTitleTextColor'>&nbsp;&nbsp;";
+	echo $WORDLIST['mcu-details'][$LANG];
+	echo "</div>";
+	echo "<table width='100%' border='1' align='center'>";
+	echo "<tr>";
+    echo "<th width='10%' font style='$MainFieldStyle; padding:5px'>SIZE</font></th>";
+	echo "<td width='10%'><select name='size' STYLE='background-color:$MainEditBackGround;width :100%' >";
+	ComboSize($size);
+	echo "</select></td>";	
+
+    echo "<th width='10%' font style='$MainFieldStyle; padding:5px'>Bitrate</font></th>";
+	echo "<td width='10%'><select name='bitrate' STYLE='background-color:$MainEditBackGround;width :100%' >";
+	ComboBitrate($bitrate);
+	echo "</select></td>";	
+	
+    echo "<th width='10%' font style='$MainFieldStyle; padding:5px'>FPS</font></th>";
+	echo "<td width='10%'><select name='fps' STYLE='background-color:$MainEditBackGround;width :100%' >";
+	ComboFPS($fps);
+	echo "</select></td>";	
+	echo "</tr></table>";
+	echo "<br>";
+	
+	echo "<div align='left' style=$MainTitleStyle color='$MainTitleTextColor'>&nbsp;&nbsp;";
+	echo $WORDLIST['mcu-room-setting'][$LANG];
+	echo "</div>";
+	
+	echo "<table id='mytable' width='100%' border='1' align='center'>";
+	echo "<tr>";
+    echo "<th width='20%' scope='col' font style='$MainFieldStyle; padding:5px'>";
+	echo $WORDLIST['mcu-room-num'][$LANG];
+	echo "</font></th>";
+	
+    echo "<th width='20%' scope='col' font style='$MainFieldStyle; padding:5px'>";
+	echo $WORDLIST['password'][$LANG];
+	echo "</font></th>";
+	
+    echo "<th width='20%' scope='col' font style='$MainFieldStyle; padding:5px'>"; 
+	echo $WORDLIST['mcu-max-member'][$LANG];
+	echo "&nbsp;&nbsp;";
+	echo "<input type='text' name='sum' size='3' readOnly  text-align:center'; />";
+
+//	echo "<Script language='JavaScript'>";
+//	echo "document.write(document.forms[0].MAX_MCU.value)";
+//	echo"</Script>";
+	
+	echo "</font></th>";
+	
+    echo "<th width='20%' scope='col' font style='$MainFieldStyle; padding:5px'>"; 
+	echo $WORDLIST['mcu-record'][$LANG];
+	echo "</font></th>";
+	
+	echo "<th width='8%' scope='col' font style='$MainFieldStyle; padding:5px'>";
+	echo $WORDLIST['del'][$LANG]; 
+	echo "</font></th>";
+	
+	echo "</tr>";
+	
+	for( $i = 0; $i < sizeof($RoomNo); $i++ )
+	{		
+		if( ($i % 2) == 0 )
+			$StrColor = $MainEditBackGround;
+		else
+			$StrColor = $MainEditBackGround1;
+			
+		echo "<tr>";
+		echo "<td><input name='ch_RoomNo[]' type='text' value='$RoomNo[$i]' style='background-color:$StrColor; width: 100%'></td>";
+		echo "<td><input name='ch_RoomPass[]' type='text' value='$RoomPass[$i]' style='background-color:$StrColor; width: 100%'></td>";
+		echo "<td><input name='ch_members[]' type='text' value='$members[$i]' onKeyUp='MemberKeyup($i)' style='background-color:$StrColor; width: 100%'></td>";
+		echo "<th scope='row'><input name='ch_check[]' $check[$i] type='checkbox' style='background-color:$StrColor; width: 100%'></th>";
+		echo "<td align='center' ><img src='$TRASH_PIC' onClick='BtnDel($i)' style='cursor: hand; style='background-color:$StrColor; width: 100%'></td>";
+		echo "</tr>";
+			
+	}
+	
+	echo "</table>";
+	
+
+?>  
+
+
+<br>
+
+<p align="center"> 
+<input name="btnNew" type="button" value="<? echo $WORDLIST['adddnew'][$LANG] ?>" onClick="javascript:Addnew()" style="<? echo $MainBtnStyle ?>;height:30px;width:60px"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+<input type='submit' name='Submit' value="<? echo $WORDLIST['submit'][$LANG] ?>" style="<? echo $MainBtnStyle ?>;height:30px;width:60px"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+<input type="submit" name="Cancel" value="<? echo $WORDLIST['cancel'][$LANG] ?>" style="<? echo $MainBtnStyle ?>;height:30px;width:60px"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+<input name="btnView" type="button" value="<? echo $WORDLIST['mcu-view-file'][$LANG] ?>" onClick="javascript:viewfile()" style="<? echo $MainBtnStyle ?>;height:30px;width:70px"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+
+
+</p>
+<br><br>
+</form>
+</div>
+</body>
+
+
+</html>
